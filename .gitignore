@@ -1,0 +1,3 @@
+/target/
+usage.json
+*.secrets.json

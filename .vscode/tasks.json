@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build and start usage MCP server",
+      "type": "shell",
+      "command": "docker build -t usage-mcp-server . && docker run --rm -i --read-only -v ${workspaceFolder}/usage.json:/run/secrets/usage.json:ro usage-mcp-server",
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "focus": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}
