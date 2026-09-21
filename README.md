@@ -1,80 +1,127 @@
+<!--
+SPDX-FileCopyrightText: 2026 Nico Ueberfeldt - ueni
+SPDX-License-Identifier: MIT
+-->
+
 # Usage MCP server
 
-This MCP server exposes one `get_usage` tool. By default it uses stdio; set `MCP_TRANSPORT=streamable-http` to expose the same MCP service over TCP using Streamable HTTP. It reads the Codex CLI access token from a mounted `auth.json`, calls the Codex usage endpoint, and returns the complete JSON response with a concise summary of weekly, monthly, and other token, credit, and request fields. Successful responses are cached for 30 seconds by default.
+A small Rust [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
+server that exposes Codex usage and rate-limit information through one tool:
+`get_usage`.
 
-Build and start it with Docker. The Codex directory is mounted read-only, so the server can reuse the CLI login without copying or creating a secret file:
+The server supports local stdio and Streamable HTTP transports. It reads the
+Codex CLI access token from a read-only `auth.json` mount, calls the Codex usage
+endpoint, and returns the original JSON response together with a concise
+summary. Successful responses are cached for 30 seconds by default.
+
+## Features
+
+- `get_usage` for weekly, monthly, credit, request, and rate-limit statistics.
+- stdio transport for clients that launch a local command.
+- Streamable HTTP transport at `/mcp` for long-running local services.
+- Readiness reports at `/healthz` and `/mcp/healthz`.
+- Opt-in provider-neutral configuration through `USAGE_SECRETS_FILE`.
+- No credential output or logging by the server.
+
+## Requirements
+
+- Docker with BuildKit and Docker Compose v2 for the container workflow.
+- A Codex CLI login at `$HOME/.codex/auth.json` when using the default Codex
+  configuration.
+
+If your network intercepts crates.io TLS with a private CA, pass the host CA
+to the build as shown below. The CA is used only during the builder stage.
+
+## Quick start
+
+### Stdio
 
 ```sh
-docker build -t usage-mcp-server .
+docker build \
+  --secret id=host_ca,src=/etc/ssl/certs/ca-certificates.crt \
+  -t usage-mcp-server:local .
+
 docker run --rm -i --read-only --user 1000:1000 \
   -e CODEX_AUTH_FILE=/mnt/codex/auth.json \
   -v "$HOME/.codex:/mnt/codex:ro" \
-  usage-mcp-server
+  usage-mcp-server:local
 ```
 
-To run the Streamable HTTP connector for Codex, bind the container port and
-listen on all container interfaces:
+### Streamable HTTP with Docker Compose
+
+The HTTP example uses port `8001` so it can run beside
+`mcp-context-manager` on port `8000`.
 
 ```sh
-docker run --rm --read-only --user 1000:1000 \
-  -e MCP_TRANSPORT=streamable-http \
-  -e HOST=0.0.0.0 \
-  -e PORT=8001 \
-  -e CODEX_AUTH_FILE=/mnt/codex/auth.json \
-  -v "$HOME/.codex:/mnt/codex:ro" \
-  -p 127.0.0.1:8001:8001 \
-  usage-mcp-server
-```
-
-The example uses port `8001` so it can run beside mcp-context-manager on
-port `8000`. The MCP endpoint is `http://127.0.0.1:8001/mcp`; `/healthz` is
-available for readiness checks. `HOST` defaults to `127.0.0.1` and `PORT` to
-`8000`.
-
-The same service can be managed with Docker Compose after building the image:
-
-```sh
-docker build --secret id=host_ca,src=/etc/ssl/certs/ca-certificates.crt \
+docker build \
+  --secret id=host_ca,src=/etc/ssl/certs/ca-certificates.crt \
   -t usage-mcp-server:local .
 docker compose up -d --force-recreate --wait --wait-timeout 30 usage-mcp-server
 docker compose ps usage-mcp-server
 ```
 
-Compose reports the service as healthy through `/mcp/healthz`.
+The MCP endpoint is `http://127.0.0.1:8001/mcp`. Compose checks
+`http://127.0.0.1:8001/mcp/healthz` and keeps the service running in the
+background. Stop it with:
 
-Register it globally for Codex with:
+```sh
+docker compose down
+```
+
+## Codex configuration
+
+Register the HTTP server globally for Codex:
 
 ```sh
 codex mcp add usage --url http://127.0.0.1:8001/mcp
 ```
 
-This writes the server to the user-level `~/.codex/config.toml`. The HTTP
-container must be running before Codex can call `get_usage`.
+For an explicit user-level configuration in `~/.codex/config.toml`:
 
-If the host's network intercepts crates.io TLS with a private CA, pass that CA
-to the builder as an optional BuildKit secret:
-
-```sh
-docker build \
-  --secret id=host_ca,src=/etc/ssl/certs/ca-certificates.crt \
-  -t usage-mcp-server .
+```toml
+[mcp_servers.usage]
+url = "http://127.0.0.1:8001/mcp"
+default_tools_approval_mode = "approve"
+enabled_tools = ["get_usage"]
 ```
 
-The CA is trusted only during the builder stage and is not copied into the
-runtime image. Omitting `--secret` keeps the normal build behavior.
+The HTTP container must be running before Codex can call `get_usage`.
 
-To mount only the credential file, use `CODEX_AUTH_FILE`:
+For a client that launches the stdio server directly, use an absolute host
+path because JSON argument arrays do not expand `${HOME}`:
 
-```sh
-docker run --rm -i --read-only --user 1000:1000 \
-  -e CODEX_AUTH_FILE=/run/secrets/auth.json \
-  -v "$HOME/.codex/auth.json:/run/secrets/auth.json:ro" \
-  usage-mcp-server
+```json
+{
+  "mcpServers": {
+    "usage": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i", "--read-only", "--user", "1000:1000",
+        "-e", "CODEX_AUTH_FILE=/mnt/codex/auth.json",
+        "-v", "/absolute/path/.codex:/mnt/codex:ro",
+        "usage-mcp-server:local"
+      ]
+    }
+  }
+}
 ```
 
-The endpoint defaults to `https://chatgpt.com/backend-api/wham/usage`. Set `CODEX_USAGE_URL` to override it. The server extracts `tokens.access_token` from the current Codex auth shape, with a top-level `access_token` fallback. It never emits or logs the token. Credentials stored only in an OS keyring or supplied ephemerally cannot be used because the container can read mounted files only.
+## Configuration
 
-The previous provider-neutral JSON configuration remains available when explicitly selected with `USAGE_SECRETS_FILE`:
+| Variable | Default | Description |
+| --- | --- | --- |
+| `MCP_TRANSPORT` | `stdio` | Set to `streamable-http` or `http` for the TCP-backed HTTP transport. |
+| `HOST` | `127.0.0.1` | HTTP bind address. Use `0.0.0.0` inside a container. |
+| `PORT` | `8000` | HTTP listen port. |
+| `CODEX_AUTH_FILE` | `$CODEX_HOME/auth.json` | Path to the Codex CLI authentication file. |
+| `CODEX_HOME` | `$HOME/.codex` | Codex directory used when `CODEX_AUTH_FILE` is unset. |
+| `CODEX_USAGE_URL` | `https://chatgpt.com/backend-api/wham/usage` | Usage API endpoint. |
+| `USAGE_SECRETS_FILE` | unset | Explicitly selects provider-neutral JSON configuration. |
+| `USAGE_CACHE_TTL_SECONDS` | `30` | Successful usage response cache lifetime. |
+| `USAGE_REQUEST_TIMEOUT_SECONDS` | `10` | Upstream usage request timeout. |
+
+When `USAGE_SECRETS_FILE` is set, the file must contain an endpoint and either
+`bearer_token` or `api_key`:
 
 ```json
 {
@@ -86,33 +133,52 @@ The previous provider-neutral JSON configuration remains available when explicit
 }
 ```
 
+Use `api_key` instead of `bearer_token` when the provider expects an
+`X-API-Key` header. `headers` is optional.
+
+## MCP and HTTP surface
+
+The server supports `initialize`, `tools/list`, `ping`, and `tools/call` for
+`get_usage` over both transports.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /healthz` | Health and version report. |
+| `GET /mcp/healthz` | Health report under the MCP base path. |
+| `POST /mcp` | Streamable HTTP MCP endpoint. |
+
+Health responses include `status`, `ok`, `server`, `version`, and `native`.
+
+## Development
+
+Run the Rust tests in a Rust toolchain environment:
+
 ```sh
-docker run --rm -i --read-only --user 1000:1000 \
-  -e USAGE_SECRETS_FILE=/run/secrets/usage.json \
-  -v "$PWD/usage.json:/run/secrets/usage.json:ro" \
-  usage-mcp-server
+cargo test
 ```
 
-Use `api_key` instead of `bearer_token` when the provider expects an `X-API-Key` header. `headers` is optional. `USAGE_CACHE_TTL_SECONDS` and `USAGE_REQUEST_TIMEOUT_SECONDS` accept unsigned integer values.
+Validate the Compose configuration without starting it:
 
-For an MCP client that starts local commands, replace `/absolute/path` with the host's absolute home path. JSON argument arrays do not expand `${HOME}`:
-
-```json
-{
-  "mcpServers": {
-    "usage": {
-      "command": "docker",
-      "args": [
-        "run", "--rm", "-i", "--read-only", "--user", "1000:1000",
-        "-e", "CODEX_AUTH_FILE=/mnt/codex/auth.json",
-        "-v", "/absolute/path/.codex:/mnt/codex:ro",
-        "usage-mcp-server"
-      ]
-    }
-  }
-}
+```sh
+docker compose config
 ```
 
-The stdio transport uses newline-delimited JSON-RPC over stdin/stdout. Both
-transports support `initialize`, `tools/list`, `ping`, and `tools/call` for
-`get_usage`.
+The VS Code task **Build and start usage MCP HTTP server** builds the image,
+starts Compose detached, waits for the healthcheck, and prints the service
+status.
+
+## Security notes
+
+- Mount `auth.json` read-only and never commit it or a provider secrets file.
+- The default HTTP bind address is loopback; the Compose deployment publishes
+  only `127.0.0.1:8001`.
+- The HTTP transport does not provide remote authentication. Keep it on a
+  trusted local interface or place it behind an authenticated reverse proxy
+  before exposing it beyond the local host.
+- Credentials are used only for the upstream request and are not included in
+  tool responses or server logs.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE). SPDX metadata and
+the REUSE configuration are provided in `REUSE.toml`.

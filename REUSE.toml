@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Nico Ueberfeldt - ueni
+# SPDX-License-Identifier: MIT
+
+version = 1
+SPDX-PackageName = "usage-mcp-server"
+SPDX-PackageSupplier = "Nico Ueberfeldt - ueni"
+
+[[annotations]]
+path = [
+  ".dockerignore",
+  ".gitignore",
+  ".vscode/**",
+  "Cargo.lock",
+  "Cargo.toml",
+  "Dockerfile",
+  "README.md",
+  "compose.yaml",
+  "src/**",
+]
+SPDX-FileCopyrightText = "2026 Nico Ueberfeldt - ueni"
+SPDX-License-Identifier = "MIT"
