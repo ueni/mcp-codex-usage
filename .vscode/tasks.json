@@ -4,7 +4,18 @@
     {
       "label": "Build and start usage MCP server",
       "type": "shell",
-      "command": "docker build -t usage-mcp-server . && docker run --rm -i --read-only -v ${workspaceFolder}/usage.json:/run/secrets/usage.json:ro usage-mcp-server",
+      "command": "docker build --secret id=host_ca,src=/etc/ssl/certs/ca-certificates.crt -t usage-mcp-server . && docker run --rm -i --read-only --user 1000:1000 -e CODEX_AUTH_FILE=/mnt/codex/auth.json -v \"$HOME/.codex:/mnt/codex:ro\" usage-mcp-server",
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build and start usage MCP HTTP server",
+      "type": "shell",
+      "command": "docker build --secret id=host_ca,src=/etc/ssl/certs/ca-certificates.crt -t usage-mcp-server:local . && docker compose up -d --force-recreate --wait --wait-timeout 30 usage-mcp-server && docker compose ps usage-mcp-server",
       "presentation": {
         "panel": "dedicated",
         "reveal": "always",

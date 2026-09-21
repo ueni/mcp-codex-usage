@@ -1,0 +1,20 @@
+services:
+  usage-mcp-server:
+    image: usage-mcp-server:local
+    environment:
+      CODEX_AUTH_FILE: /mnt/codex/auth.json
+      HOST: 0.0.0.0
+      MCP_TRANSPORT: streamable-http
+      PORT: 8001
+    ports:
+      - "127.0.0.1:8001:8001"
+    restart: unless-stopped
+    user: "1000:1000"
+    volumes:
+      - "${HOME}/.codex:/mnt/codex:ro"
+    healthcheck:
+      test: ["CMD", "/usage-mcp-server", "--healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
